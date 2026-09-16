@@ -347,6 +347,42 @@
     color: var(--text-muted);
   }
   footer.legend span { display: flex; align-items: center; gap: 6px; }
+
+  /* ---------- Image → Bitmap ---------- */
+  .file-input {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    width: 100%;
+  }
+  .file-input::file-selector-button {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-panel);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 10px;
+    cursor: pointer;
+    margin-right: 10px;
+  }
+  .file-input::file-selector-button:hover { border-color: var(--accent); }
+  .img-controls { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+  .img-toggles { display: flex; gap: 14px; flex-wrap: wrap; }
+  .img-toggles label { white-space: nowrap; }
+  .img-preview-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    background: #000;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    padding: 8px;
+  }
+  #imgPreviewCanvas { image-rendering: pixelated; display: block; max-width: 100%; }
+  .img-preview-wrap .canvas-meta { margin: 0; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -474,6 +510,32 @@
           <button id="importBtn">Load into grid</button>
         </div>
         <p class="hint">Byte count must be a multiple of the current width in bytes (<span id="rowByteHint">16</span>). Height is set automatically from the pasted data.</p>
+      </div>
+
+      <div class="panel-block">
+        <h2>Image → Bitmap</h2>
+        <p class="sub">Load a PNG/JPG and convert it to a 1-bit monochrome bitmap.</p>
+        <input type="file" id="imgFileInput" class="file-input" accept="image/*">
+
+        <div class="img-controls" id="imgControls" hidden>
+          <div class="field">
+            <label for="thresholdRange">Threshold — <span id="thresholdLabel">128</span></label>
+            <input type="range" id="thresholdRange" min="0" max="255" value="128">
+          </div>
+          <div class="img-toggles">
+            <label class="grid-toggle"><input type="checkbox" id="invertImgToggle"> Invert</label>
+            <label class="grid-toggle"><input type="checkbox" id="ditherToggle" checked> Dither</label>
+            <label class="grid-toggle"><input type="checkbox" id="fitAspectToggle" checked> Resize height to fit image</label>
+          </div>
+          <div class="img-preview-wrap">
+            <canvas id="imgPreviewCanvas"></canvas>
+            <span class="canvas-meta" id="imgPreviewMeta">—</span>
+          </div>
+          <div class="row-actions">
+            <button class="primary" id="applyImgBtn">Apply to canvas</button>
+            <button class="ghost" id="cancelImgBtn">Cancel</button>
+          </div>
+        </div>
       </div>
 
       <p class="hint">
@@ -922,6 +984,141 @@
     resizeCanvas(); render(); updateCode();
     history = []; historyIndex = -1; pushHistory();
     pulseLed();
+  });
+
+  // ---------- Image → Bitmap ----------
+  const imgFileInput     = document.getElementById("imgFileInput");
+  const imgControls      = document.getElementById("imgControls");
+  const thresholdRange   = document.getElementById("thresholdRange");
+  const thresholdLabel   = document.getElementById("thresholdLabel");
+  const invertImgToggle  = document.getElementById("invertImgToggle");
+  const ditherToggle     = document.getElementById("ditherToggle");
+  const fitAspectToggle  = document.getElementById("fitAspectToggle");
+  const imgPreviewCanvas = document.getElementById("imgPreviewCanvas");
+  const imgPreviewCtx    = imgPreviewCanvas.getContext("2d");
+  const imgPreviewMeta   = document.getElementById("imgPreviewMeta");
+  const applyImgBtn      = document.getElementById("applyImgBtn");
+  const cancelImgBtn     = document.getElementById("cancelImgBtn");
+
+  let sourceImage = null;
+  let previewGrid = null;
+  let previewW = 0, previewH = 0;
+
+  imgFileInput.addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        sourceImage = img;
+        imgControls.hidden = false;
+        computeImagePreview();
+      };
+      img.onerror = () => alert("Couldn't load that image.");
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  function computeImagePreview() {
+    if (!sourceImage) return;
+
+    previewW = W;
+    previewH = fitAspectToggle.checked
+      ? Math.max(1, Math.round(W * (sourceImage.naturalHeight / sourceImage.naturalWidth)))
+      : H;
+
+    // Downscale the source image onto an offscreen canvas at target resolution.
+    const off = document.createElement("canvas");
+    off.width = previewW; off.height = previewH;
+    const octx = off.getContext("2d");
+    octx.drawImage(sourceImage, 0, 0, previewW, previewH);
+    const data = octx.getImageData(0, 0, previewW, previewH).data;
+
+    // Luminance buffer (float — needed as an error-diffusion accumulator for dithering).
+    const lum = new Float32Array(previewW * previewH);
+    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+      lum[p] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    }
+
+    const threshold = parseInt(thresholdRange.value, 10);
+    const invert = invertImgToggle.checked;
+    const g = new Uint8Array(previewW * previewH);
+
+    if (ditherToggle.checked) {
+      // Floyd–Steinberg error diffusion — much cleaner results at low pixel counts
+      // than a flat threshold, especially for photos/gradients.
+      for (let y = 0; y < previewH; y++) {
+        for (let x = 0; x < previewW; x++) {
+          const p = y * previewW + x;
+          const old = lum[p];
+          const on = old < threshold;          // dark source pixel -> lit bitmap pixel
+          g[p] = (on !== invert) ? 1 : 0;
+          const newVal = on ? 0 : 255;
+          const err = old - newVal;
+          if (x + 1 < previewW)                    lum[p + 1]              += err * 7 / 16;
+          if (x - 1 >= 0 && y + 1 < previewH)       lum[p - 1 + previewW]   += err * 3 / 16;
+          if (y + 1 < previewH)                     lum[p + previewW]      += err * 5 / 16;
+          if (x + 1 < previewW && y + 1 < previewH) lum[p + 1 + previewW]  += err * 1 / 16;
+        }
+      }
+    } else {
+      for (let p = 0; p < lum.length; p++) {
+        const on = lum[p] < threshold;
+        g[p] = (on !== invert) ? 1 : 0;
+      }
+    }
+
+    previewGrid = g;
+    renderImagePreview();
+  }
+
+  function renderImagePreview() {
+    if (!previewGrid) return;
+    const maxDisplayW = 260;
+    const previewZoom = Math.max(1, Math.min(8, Math.floor(maxDisplayW / previewW)));
+    imgPreviewCanvas.width  = previewW * previewZoom;
+    imgPreviewCanvas.height = previewH * previewZoom;
+    imgPreviewCtx.fillStyle = "#000000";
+    imgPreviewCtx.fillRect(0, 0, imgPreviewCanvas.width, imgPreviewCanvas.height);
+    imgPreviewCtx.fillStyle = "#47e0ff";
+    for (let y = 0; y < previewH; y++) {
+      for (let x = 0; x < previewW; x++) {
+        if (previewGrid[y * previewW + x]) {
+          imgPreviewCtx.fillRect(x * previewZoom, y * previewZoom, previewZoom, previewZoom);
+        }
+      }
+    }
+    imgPreviewMeta.textContent = previewW + "×" + previewH + " px preview" +
+      (previewW !== W || previewH !== H ? " (will resize canvas)" : "");
+  }
+
+  thresholdRange.addEventListener("input", () => {
+    thresholdLabel.textContent = thresholdRange.value;
+    if (sourceImage) computeImagePreview();
+  });
+  [invertImgToggle, ditherToggle, fitAspectToggle].forEach((el) => {
+    el.addEventListener("change", () => { if (sourceImage) computeImagePreview(); });
+  });
+
+  applyImgBtn.addEventListener("click", () => {
+    if (!previewGrid) return;
+    if (previewW !== W || previewH !== H) {
+      W = previewW; H = previewH; bitsPerRowBytes = W / 8;
+      document.getElementById("widthIn").value = W;
+      document.getElementById("heightIn").value = H;
+      resizeCanvas();
+    }
+    grid = previewGrid.slice();
+    render(); updateCode(); pushHistory(); pulseLed();
+  });
+
+  cancelImgBtn.addEventListener("click", () => {
+    sourceImage = null;
+    previewGrid = null;
+    imgControls.hidden = true;
+    imgFileInput.value = "";
   });
 
   // ---------- Copy ----------
