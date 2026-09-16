@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bitmap Editor — OLED Array Tool</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-chrome: #eef0f1;
+    --bg-panel: #ffffff;
+    --bg-panel-2: #f5f6f7;
+    --border: #d7dadc;
+    --border-strong: #b9bdc0;
+    --text: #1b1f21;
+    --text-muted: #6b7275;
+    --accent: #0891a8;
+    --accent-glow: #12b8d4;
+    --led-off: #3a4144;
+    --led-on: #34d17c;
+    --danger: #c94f4f;
+    --canvas-bg: #000000;
+    --pixel-on: #47e0ff;
+    --grid-line: rgba(255,255,255,0.07);
+    --shadow: 0 1px 2px rgba(0,0,0,0.06), 0 4px 14px rgba(0,0,0,0.06);
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg-chrome: #1b1f21;
+      --bg-panel: #232829;
+      --bg-panel-2: #1e2325;
+      --border: #33393b;
+      --border-strong: #454c4e;
+      --text: #e7e9ea;
+      --text-muted: #9aa0a3;
+      --accent: #47e0ff;
+      --accent-glow: #7cebff;
+      --led-off: #3a4144;
+      --led-on: #34d17c;
+      --danger: #e07a7a;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 6px 20px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg-chrome: #1b1f21;
+    --bg-panel: #232829;
+    --bg-panel-2: #1e2325;
+    --border: #33393b;
+    --border-strong: #454c4e;
+    --text: #e7e9ea;
+    --text-muted: #9aa0a3;
+    --accent: #47e0ff;
+    --accent-glow: #7cebff;
+    --led-off: #3a4144;
+    --led-on: #34d17c;
+    --danger: #e07a7a;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 6px 20px rgba(0,0,0,0.35);
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg-chrome);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  body { min-height: 100vh; }
+
+  .app {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 20px 20px 48px;
+  }
+
+  /* ---------- Header ---------- */
+  .topbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 18px 28px;
+    padding-bottom: 18px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-led {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--led-off);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--led-off) 25%, transparent);
+    transition: background .25s ease, box-shadow .25s ease;
+    flex: none;
+  }
+  .brand-led.lit {
+    background: var(--led-on);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--led-on) 25%, transparent), 0 0 8px var(--led-on);
+  }
+  .brand h1 {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  .brand p {
+    margin: 2px 0 0;
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field label {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+  .field input[type="text"],
+  .field input[type="number"] {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 7px 9px;
+    color: var(--text);
+    width: 92px;
+  }
+  .field input#arrayName { width: 168px; }
+  .field input:focus-visible, button:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .dims { display: flex; gap: 10px; align-items: flex-end; }
+  .dims .x { color: var(--text-muted); padding-bottom: 8px; font-size: 13px; }
+
+  .spacer { flex: 1; }
+
+  .presets { display: flex; flex-direction: column; gap: 5px; }
+  .presets label { font-size: 11.5px; color: var(--text-muted); font-weight: 500; }
+  .preset-buttons { display: flex; gap: 6px; }
+
+  button {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 12.5px;
+    font-weight: 500;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-panel);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 7px 11px;
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease, color .15s ease;
+    white-space: nowrap;
+  }
+  button:hover { border-color: var(--accent); }
+  button:active { transform: translateY(1px); }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #04222a;
+  }
+  button.primary:hover { background: var(--accent-glow); border-color: var(--accent-glow); }
+  button.ghost { background: transparent; }
+  button.small { padding: 5px 9px; font-size: 11.5px; }
+
+  /* ---------- Workspace ---------- */
+  .workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+    gap: 22px;
+    align-items: start;
+  }
+  @media (max-width: 860px) {
+    .workspace { grid-template-columns: 1fr; }
+  }
+
+  .device-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 20px;
+  }
+
+  .bezel {
+    background: #101314;
+    border: 1px solid #050607;
+    border-radius: 14px;
+    padding: 18px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), inset 0 0 0 1px rgba(0,0,0,0.4);
+    display: flex;
+    justify-content: center;
+    position: relative;
+  }
+  .bezel::before {
+    content: "";
+    position: absolute;
+    top: 9px; left: 18px;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: #2a2f31;
+  }
+  .screen-wrap {
+    background: var(--canvas-bg);
+    border-radius: 4px;
+    overflow: auto;
+    max-width: 100%;
+    box-shadow: 0 0 0 1px #000;
+  }
+  #gridCanvas {
+    display: block;
+    image-rendering: pixelated;
+    cursor: crosshair;
+    touch-action: none;
+  }
+
+  .canvas-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+  .canvas-meta span.hi { color: var(--accent); }
+
+  .toolbar {
+    margin-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  .tool-group {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    background: var(--bg-panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .tool-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: 5px;
+    width: 32px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0;
+    cursor: pointer;
+  }
+  .tool-btn svg { width: 16px; height: 16px; }
+  .tool-btn:hover { color: var(--text); }
+  .tool-btn.active {
+    background: var(--accent);
+    color: #04222a;
+  }
+  .toolbar .divider { width: 1px; align-self: stretch; background: var(--border); margin: 2px 4px; }
+
+  .zoom-control {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--text-muted);
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .zoom-control input[type="range"] { width: 100px; accent-color: var(--accent); }
+
+  .grid-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
+  .grid-toggle input { accent-color: var(--accent); }
+
+  /* ---------- Code panel ---------- */
+  .code-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .panel-block {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 16px;
+  }
+  .panel-block h2 {
+    font-size: 12.5px;
+    font-weight: 600;
+    margin: 0 0 4px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--text);
+  }
+  .panel-block .sub {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    margin: 0 0 10px;
+  }
+  textarea {
+    width: 100%;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.55;
+    background: #0d1112;
+    color: #9fe9c8;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    padding: 12px;
+    resize: vertical;
+    tab-size: 2;
+  }
+  textarea#codeOut { min-height: 220px; color: #7fe6ff; }
+  textarea#importIn { min-height: 90px; color: #d6d9da; }
+
+  .row-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .copy-feedback {
+    font-size: 11.5px;
+    color: var(--led-on);
+    opacity: 0;
+    transition: opacity .2s ease;
+    align-self: center;
+  }
+  .copy-feedback.show { opacity: 1; }
+
+  .hint {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    margin-top: 8px;
+    line-height: 1.5;
+  }
+  kbd {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    background: var(--bg-panel-2);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+
+  footer.legend {
+    margin-top: 22px;
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+  footer.legend span { display: flex; align-items: center; gap: 6px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-led" id="brandLed"></span>
+      <div>
+        <h1>Bitmap Editor</h1>
+        <p>Monochrome pixel art → GPC byte array</p>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="arrayName">Array name</label>
+      <input type="text" id="arrayName" value="LOGO_BITMAP" spellcheck="false">
+    </div>
+
+    <div class="dims">
+      <div class="field">
+        <label for="widthIn">Width (px)</label>
+        <input type="number" id="widthIn" value="128" min="8" max="256" step="8">
+      </div>
+      <div class="x">×</div>
+      <div class="field">
+        <label for="heightIn">Height (px)</label>
+        <input type="number" id="heightIn" value="64" min="1" max="256" step="1">
+      </div>
+      <button id="resizeBtn">Apply size</button>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="presets">
+      <label>Presets</label>
+      <div class="preset-buttons">
+        <button class="small" id="presetBlank">New / blank</button>
+        <button class="small" id="presetLogo">OG-BO7 logo</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="workspace">
+
+    <section class="device-panel">
+      <div class="bezel">
+        <div class="screen-wrap">
+          <canvas id="gridCanvas"></canvas>
+        </div>
+      </div>
+      <div class="canvas-meta">
+        <span><span class="hi" id="dimsLabel">128×64</span> px · <span id="byteLabel">1024</span> bytes</span>
+        <span id="coordLabel">—</span>
+      </div>
+
+      <div class="toolbar">
+        <div class="tool-group" role="group" aria-label="Drawing tools">
+          <button class="tool-btn active" id="toolPen" title="Pen (B)" aria-label="Pen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+          </button>
+          <button class="tool-btn" id="toolEraser" title="Eraser (E)" aria-label="Eraser">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H7L3 16c-.5-.5-.5-1.5 0-2L13 4c.5-.5 1.5-.5 2 0l6 6c.5.5.5 1.5 0 2L13 20"/></svg>
+          </button>
+          <button class="tool-btn" id="toolBucket" title="Fill (F)" aria-label="Fill">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 11l-8-8-8.5 8.5a2 2 0 000 3L9 21l10-10z"/><path d="M5 9l8 8"/><path d="M22 17c0 1.5-1 3-2 3s-2-1.5-2-3c0-1 1-2.5 2-4 1 1.5 2 3 2 4z"/></svg>
+          </button>
+        </div>
+
+        <div class="tool-group">
+          <button class="tool-btn" id="btnUndo" title="Undo (Ctrl+Z)" aria-label="Undo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 00-15-6.7L3 13"/></svg>
+          </button>
+          <button class="tool-btn" id="btnRedo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0115-6.7L21 13"/></svg>
+          </button>
+        </div>
+
+        <div class="tool-group">
+          <button class="tool-btn" id="btnInvert" title="Invert all pixels" aria-label="Invert">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 010 18z" fill="currentColor" stroke="none"/></svg>
+          </button>
+          <button class="tool-btn" id="btnClear" title="Clear canvas" aria-label="Clear">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+          </button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="zoom-control">
+          <span>Zoom</span>
+          <input type="range" id="zoomRange" min="2" max="14" value="7" step="1">
+          <span id="zoomLabel">7×</span>
+        </div>
+
+        <label class="grid-toggle">
+          <input type="checkbox" id="gridToggle" checked>
+          Grid lines
+        </label>
+      </div>
+
+      <footer class="legend">
+        <span><svg width="12" height="12" viewBox="0 0 12 12"><rect width="12" height="12" fill="#47e0ff" rx="2"/></svg> pixel on</span>
+        <span><svg width="12" height="12" viewBox="0 0 12 12"><rect width="12" height="12" fill="#000" stroke="#444" rx="2"/></svg> pixel off</span>
+        <span>Click or drag to draw · right-click erases</span>
+      </footer>
+    </section>
+
+    <section class="code-panel">
+      <div class="panel-block">
+        <h2>Export</h2>
+        <p class="sub">Ready to paste into a .gpc file as a <code>const uint8</code> array.</p>
+        <textarea id="codeOut" readonly spellcheck="false"></textarea>
+        <div class="row-actions">
+          <button class="primary" id="copyBtn">Copy code</button>
+          <span class="copy-feedback" id="copyFeedback">Copied</span>
+        </div>
+      </div>
+
+      <div class="panel-block">
+        <h2>Import</h2>
+        <p class="sub">Paste an existing byte array (with or without <code>0x</code> / commas) to load it at the current width.</p>
+        <textarea id="importIn" placeholder="0x00, 0x00, 0x60, 0x00, ..."></textarea>
+        <div class="row-actions">
+          <button id="importBtn">Load into grid</button>
+        </div>
+        <p class="hint">Byte count must be a multiple of the current width in bytes (<span id="rowByteHint">16</span>). Height is set automatically from the pasted data.</p>
+      </div>
+
+      <p class="hint">
+        <kbd>B</kbd> pen &nbsp; <kbd>E</kbd> eraser &nbsp; <kbd>F</kbd> fill &nbsp;
+        <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo &nbsp; <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> redo
+      </p>
+    </section>
+
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- State ----------
+  let W = 128, H = 64;
+  let bitsPerRowBytes = W / 8;
+  let grid = new Uint8Array(W * H); // 1 = on, 0 = off
+  let history = [];
+  let historyIndex = -1;
+  const MAX_HISTORY = 60;
+
+  let tool = "pen";
+  let zoom = 7;
+  let showGrid = true;
+  let isDrawing = false;
+  let drawValue = 1;
+
+  const canvas = document.getElementById("gridCanvas");
+  const ctx = canvas.getContext("2d");
+  const dimsLabel = document.getElementById("dimsLabel");
+  const byteLabel = document.getElementById("byteLabel");
+  const coordLabel = document.getElementById("coordLabel");
+  const codeOut = document.getElementById("codeOut");
+  const importIn = document.getElementById("importIn");
+  const rowByteHint = document.getElementById("rowByteHint");
+  const brandLed = document.getElementById("brandLed");
+  const zoomLabel = document.getElementById("zoomLabel");
+
+  let ledTimeout = null;
+  function pulseLed() {
+    brandLed.classList.add("lit");
+    clearTimeout(ledTimeout);
+    ledTimeout = setTimeout(() => brandLed.classList.remove("lit"), 420);
+  }
+
+  // ---------- Grid <-> bytes ----------
+  function idx(x, y) { return y * W + x; }
+
+  function gridToBytes() {
+    const bytesPerRow = W / 8;
+    const bytes = new Uint8Array(bytesPerRow * H);
+    for (let y = 0; y < H; y++) {
+      for (let bcol = 0; bcol < bytesPerRow; bcol++) {
+        let b = 0;
+        for (let bit = 0; bit < 8; bit++) {
+          const x = bcol * 8 + bit;
+          if (grid[idx(x, y)]) b |= (0x80 >> bit);
+        }
+        bytes[y * bytesPerRow + bcol] = b;
+      }
+    }
+    return bytes;
+  }
+
+  function bytesToGrid(bytes, widthPx, heightPx) {
+    const bytesPerRow = widthPx / 8;
+    const g = new Uint8Array(widthPx * heightPx);
+    for (let y = 0; y < heightPx; y++) {
+      for (let bcol = 0; bcol < bytesPerRow; bcol++) {
+        const b = bytes[y * bytesPerRow + bcol] || 0;
+        for (let bit = 0; bit < 8; bit++) {
+          const x = bcol * 8 + bit;
+          g[y * widthPx + x] = (b & (0x80 >> bit)) ? 1 : 0;
+        }
+      }
+    }
+    return g;
+  }
+
+  function formatCode() {
+    const name = document.getElementById("arrayName").value.trim() || "BITMAP";
+    const bytes = gridToBytes();
+    const bytesPerRow = W / 8;
+    let lines = [];
+    for (let y = 0; y < H; y++) {
+      let parts = [];
+      for (let b = 0; b < bytesPerRow; b++) {
+        const isLast = (y === H - 1) && (b === bytesPerRow - 1);
+        const hex = "0x" + bytes[y * bytesPerRow + b].toString(16).padStart(2, "0");
+        parts.push(hex + (isLast ? "" : ","));
+      }
+      lines.push(parts.join(" "));
+    }
+    const header =
+      "// " + name + " — " + W + "x" + H + " px, 1-bit monochrome\n" +
+      "// " + bytesPerRow + " bytes per row x " + H + " rows = " + bytes.length + " bytes\n" +
+      "define " + name + "_WIDTH_BYTES = " + bytesPerRow + ";\n" +
+      "define " + name + "_HEIGHT      = " + H + ";\n" +
+      "const uint8 " + name + "[] = {\n";
+    return header + lines.join("\n") + "\n};";
+  }
+
+  function updateCode() {
+    codeOut.value = formatCode();
+    dimsLabel.textContent = W + "×" + H;
+    byteLabel.textContent = (W / 8) * H;
+    rowByteHint.textContent = W / 8;
+  }
+
+  // ---------- History ----------
+  function pushHistory() {
+    history = history.slice(0, historyIndex + 1);
+    history.push(grid.slice());
+    if (history.length > MAX_HISTORY) history.shift();
+    historyIndex = history.length - 1;
+  }
+  function undo() {
+    if (historyIndex <= 0) return;
+    historyIndex--;
+    grid = history[historyIndex].slice();
+    render(); updateCode();
+  }
+  function redo() {
+    if (historyIndex >= history.length - 1) return;
+    historyIndex++;
+    grid = history[historyIndex].slice();
+    render(); updateCode();
+  }
+
+  // ---------- Rendering ----------
+  function resizeCanvas() {
+    canvas.width = W * zoom;
+    canvas.height = H * zoom;
+  }
+
+  function render() {
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#47e0ff";
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (grid[idx(x, y)]) {
+          ctx.fillRect(x * zoom, y * zoom, zoom, zoom);
+        }
+      }
+    }
+    if (showGrid && zoom >= 5) {
+      ctx.strokeStyle = "rgba(255,255,255,0.07)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = 0; x <= W; x++) {
+        ctx.moveTo(x * zoom + 0.5, 0);
+        ctx.lineTo(x * zoom + 0.5, H * zoom);
+      }
+      for (let y = 0; y <= H; y++) {
+        ctx.moveTo(0, y * zoom + 0.5);
+        ctx.lineTo(W * zoom, y * zoom + 0.5);
+      }
+      ctx.stroke();
+      // 8px byte-boundary lines, slightly stronger
+      ctx.strokeStyle = "rgba(255,255,255,0.16)";
+      ctx.beginPath();
+      for (let x = 0; x <= W; x += 8) {
+        ctx.moveTo(x * zoom + 0.5, 0);
+        ctx.lineTo(x * zoom + 0.5, H * zoom);
+      }
+      ctx.stroke();
+    }
+  }
+
+  // ---------- Drawing interaction ----------
+  function eventToCell(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const cx = (e.clientX - rect.left) * scaleX;
+    const cy = (e.clientY - rect.top) * scaleY;
+    const x = Math.floor(cx / zoom);
+    const y = Math.floor(cy / zoom);
+    return { x, y };
+  }
+
+  function setPixel(x, y, val) {
+    if (x < 0 || x >= W || y < 0 || y >= H) return false;
+    const i = idx(x, y);
+    if (grid[i] === val) return false;
+    grid[i] = val;
+    return true;
+  }
+
+  function floodFill(x0, y0, target) {
+    const replacement = target ? 0 : 1;
+    if (target === replacement) return;
+    const stack = [[x0, y0]];
+    const visited = new Uint8Array(W * H);
+    while (stack.length) {
+      const [x, y] = stack.pop();
+      if (x < 0 || x >= W || y < 0 || y >= H) continue;
+      const i = idx(x, y);
+      if (visited[i]) continue;
+      if (grid[i] !== target) continue;
+      visited[i] = 1;
+      grid[i] = replacement;
+      stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+    }
+  }
+
+  let strokeChanged = false;
+
+  function handlePointerDown(e) {
+    e.preventDefault();
+    const { x, y } = eventToCell(e);
+    if (x < 0 || x >= W || y < 0 || y >= H) return;
+
+    if (tool === "bucket") {
+      const target = grid[idx(x, y)];
+      floodFill(x, y, target);
+      render(); updateCode(); pushHistory(); pulseLed();
+      return;
+    }
+
+    isDrawing = true;
+    strokeChanged = false;
+    const eraseMode = (e.button === 2) || tool === "eraser";
+    drawValue = eraseMode ? 0 : 1;
+    if (setPixel(x, y, drawValue)) strokeChanged = true;
+    render();
+    coordLabel.textContent = x + ", " + y;
+  }
+
+  function handlePointerMove(e) {
+    const { x, y } = eventToCell(e);
+    if (x >= 0 && x < W && y >= 0 && y < H) coordLabel.textContent = x + ", " + y;
+    else coordLabel.textContent = "—";
+    if (!isDrawing) return;
+    if (setPixel(x, y, drawValue)) strokeChanged = true;
+    render();
+  }
+
+  function handlePointerUp() {
+    if (isDrawing && strokeChanged) {
+      updateCode();
+      pushHistory();
+      pulseLed();
+    }
+    isDrawing = false;
+  }
+
+  canvas.addEventListener("mousedown", handlePointerDown);
+  window.addEventListener("mousemove", handlePointerMove);
+  window.addEventListener("mouseup", handlePointerUp);
+  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  canvas.addEventListener("mouseleave", () => { coordLabel.textContent = "—"; });
+
+  canvas.addEventListener("touchstart", (e) => {
+    const t = e.touches[0];
+    handlePointerDown({ clientX: t.clientX, clientY: t.clientY, button: 0, preventDefault: () => e.preventDefault() });
+  }, { passive: false });
+  canvas.addEventListener("touchmove", (e) => {
+    const t = e.touches[0];
+    handlePointerMove({ clientX: t.clientX, clientY: t.clientY });
+    e.preventDefault();
+  }, { passive: false });
+  canvas.addEventListener("touchend", (e) => { handlePointerUp(); e.preventDefault(); }, { passive: false });
+
+  // ---------- Toolbar wiring ----------
+  function setTool(name) {
+    tool = name;
+    document.querySelectorAll(".tool-btn[id^='tool']").forEach(b => b.classList.remove("active"));
+    document.getElementById("tool" + name.charAt(0).toUpperCase() + name.slice(1)).classList.add("active");
+  }
+  document.getElementById("toolPen").addEventListener("click", () => setTool("pen"));
+  document.getElementById("toolEraser").addEventListener("click", () => setTool("eraser"));
+  document.getElementById("toolBucket").addEventListener("click", () => setTool("bucket"));
+
+  document.getElementById("btnUndo").addEventListener("click", undo);
+  document.getElementById("btnRedo").addEventListener("click", redo);
+
+  document.getElementById("btnInvert").addEventListener("click", () => {
+    for (let i = 0; i < grid.length; i++) grid[i] = grid[i] ? 0 : 1;
+    render(); updateCode(); pushHistory(); pulseLed();
+  });
+  document.getElementById("btnClear").addEventListener("click", () => {
+    grid.fill(0);
+    render(); updateCode(); pushHistory(); pulseLed();
+  });
+
+  const zoomRange = document.getElementById("zoomRange");
+  zoomRange.addEventListener("input", () => {
+    zoom = parseInt(zoomRange.value, 10);
+    zoomLabel.textContent = zoom + "×";
+    resizeCanvas(); render();
+  });
+
+  document.getElementById("gridToggle").addEventListener("change", (e) => {
+    showGrid = e.target.checked;
+    render();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    const tag = document.activeElement.tagName;
+    if (tag === "TEXTAREA" || tag === "INPUT") return;
+    if (e.key === "b" || e.key === "B") setTool("pen");
+    if (e.key === "e" || e.key === "E") setTool("eraser");
+    if (e.key === "f" || e.key === "F") setTool("bucket");
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      if (e.shiftKey) redo(); else undo();
+    }
+  });
+
+  // ---------- Resize / new canvas ----------
+  function applySize(newW, newH, preserveContent) {
+    newW = Math.max(8, Math.round(newW / 8) * 8);
+    newH = Math.max(1, Math.round(newH));
+    let newGrid = new Uint8Array(newW * newH);
+    if (preserveContent) {
+      const copyW = Math.min(W, newW);
+      const copyH = Math.min(H, newH);
+      for (let y = 0; y < copyH; y++) {
+        for (let x = 0; x < copyW; x++) {
+          newGrid[y * newW + x] = grid[idx(x, y)];
+        }
+      }
+    }
+    W = newW; H = newH;
+    bitsPerRowBytes = W / 8;
+    grid = newGrid;
+    document.getElementById("widthIn").value = W;
+    document.getElementById("heightIn").value = H;
+    resizeCanvas();
+    render();
+    updateCode();
+    history = []; historyIndex = -1;
+    pushHistory();
+  }
+
+  document.getElementById("resizeBtn").addEventListener("click", () => {
+    const w = parseInt(document.getElementById("widthIn").value, 10) || W;
+    const h = parseInt(document.getElementById("heightIn").value, 10) || H;
+    applySize(w, h, true);
+    pulseLed();
+  });
+
+  document.getElementById("arrayName").addEventListener("input", updateCode);
+
+  // ---------- Presets ----------
+  document.getElementById("presetBlank").addEventListener("click", () => {
+    applySize(parseInt(document.getElementById("widthIn").value, 10) || 128,
+               parseInt(document.getElementById("heightIn").value, 10) || 64, false);
+    pulseLed();
+  });
+
+  const LOGO_BYTES = new Uint8Array([
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x60,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x18,0x00,0x00,
+    0x00,0x00,0x78,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x78,0x00,0x00,
+    0x00,0x00,0x3e,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0xf0,0x00,0x00,
+    0x00,0x00,0x0f,0x80,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x07,0xc0,0x00,0x00,
+    0x00,0x00,0x2f,0xe0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x1f,0xc0,0x00,0x00,
+    0x00,0x00,0x1f,0xf8,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x7f,0xe0,0x00,0x00,
+    0x00,0x00,0x0f,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0xff,0xc0,0x00,0x00,
+    0x00,0x00,0x03,0xdd,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x0f,0xff,0x80,0x00,0x00,
+    0x00,0x00,0x1d,0xfb,0xf8,0x00,0x00,0x00,0x00,0x00,0x00,0x7d,0xfe,0xf0,0x00,0x00,
+    0x00,0x00,0x0f,0xff,0x7f,0x00,0x00,0x00,0x00,0x00,0x03,0xfb,0xff,0xc0,0x00,0x00,
+    0x00,0x00,0x03,0xef,0xef,0xf8,0x00,0x00,0x00,0x00,0x1f,0xdb,0xdf,0x80,0x00,0x00,
+    0x00,0x00,0x01,0xfe,0x7e,0x7c,0x00,0x00,0x00,0x00,0xfd,0xf9,0xfe,0x00,0x00,0x00,
+    0x00,0x00,0x07,0xbf,0xef,0xe6,0x00,0x00,0x00,0x01,0xbf,0xff,0x77,0x80,0x00,0x00,
+    0x00,0x00,0x03,0xf9,0xf3,0xf7,0x00,0x00,0x00,0x03,0xbf,0x1f,0x7f,0x00,0x00,0x00,
+    0x00,0x00,0x00,0xff,0xef,0xff,0x00,0x00,0x00,0x03,0xff,0xdf,0xfc,0x00,0x00,0x00,
+    0x00,0x00,0x03,0xef,0xdb,0xfb,0x00,0x00,0x00,0x03,0x7f,0x6d,0xdf,0x00,0x00,0x00,
+    0x00,0x00,0x00,0xff,0x0f,0xff,0x80,0x00,0x00,0x03,0xbf,0xe3,0xfe,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x7f,0xfd,0xf1,0x80,0x00,0x00,0x07,0x3e,0xff,0xf0,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x0f,0xf3,0xff,0xe0,0x00,0x00,0x1f,0xff,0x3f,0xe0,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x7f,0xfd,0xfb,0xf0,0x00,0x00,0x3f,0x7f,0x0f,0xf8,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x1f,0xff,0xde,0xbf,0x40,0x0f,0xf5,0xef,0xff,0xf0,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x01,0xfe,0xbe,0xab,0xc0,0x0f,0x55,0xf5,0xff,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x0f,0xfe,0xff,0xfb,0x80,0x17,0x77,0xfd,0xff,0x80,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x0f,0xfd,0xdf,0xff,0xa0,0x17,0xff,0xee,0xff,0xc0,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x07,0xf7,0xeb,0xb0,0x3b,0x5d,0xaf,0x80,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x1f,0xbf,0xf7,0xd0,0x2f,0xbf,0xd7,0xc0,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x3f,0x73,0xdf,0x38,0x43,0xed,0x3b,0xe0,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x38,0xff,0xbe,0xec,0x9d,0xe3,0xfc,0x70,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x01,0xff,0xff,0xe0,0x1b,0xff,0xfe,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x01,0x9f,0xfb,0xb0,0x37,0xef,0xe6,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x1d,0xdf,0x80,0x07,0xee,0xe0,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x19,0x9d,0x80,0x06,0xe6,0x60,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x11,0x88,0x00,0x00,0x46,0x20,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+  ]);
+
+  document.getElementById("presetLogo").addEventListener("click", () => {
+    document.getElementById("arrayName").value = "LOGO_BITMAP";
+    W = 128; H = 60; bitsPerRowBytes = 16;
+    grid = bytesToGrid(LOGO_BYTES, W, H);
+    document.getElementById("widthIn").value = W;
+    document.getElementById("heightIn").value = H;
+    resizeCanvas(); render(); updateCode();
+    history = []; historyIndex = -1; pushHistory();
+    pulseLed();
+  });
+
+  // ---------- Import ----------
+  document.getElementById("importBtn").addEventListener("click", () => {
+    const raw = importIn.value;
+    const matches = raw.match(/0x[0-9a-fA-F]{1,2}|\b[0-9a-fA-F]{2}\b/g);
+    if (!matches || matches.length === 0) {
+      alert("No hex bytes found. Paste values like 0x00, 0x1F, ...");
+      return;
+    }
+    const bytes = matches.map(t => parseInt(t.replace("0x", ""), 16));
+    const bpr = W / 8;
+    if (bytes.length % bpr !== 0) {
+      alert("Byte count (" + bytes.length + ") isn't a multiple of the current row width (" + bpr + " bytes = " + W + "px).\nAdjust Width above to match, then try again.");
+      return;
+    }
+    const newH = bytes.length / bpr;
+    H = newH;
+    grid = bytesToGrid(new Uint8Array(bytes), W, H);
+    document.getElementById("heightIn").value = H;
+    resizeCanvas(); render(); updateCode();
+    history = []; historyIndex = -1; pushHistory();
+    pulseLed();
+  });
+
+  // ---------- Copy ----------
+  document.getElementById("copyBtn").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(codeOut.value);
+    } catch (err) {
+      codeOut.select();
+      document.execCommand("copy");
+    }
+    const fb = document.getElementById("copyFeedback");
+    fb.classList.add("show");
+    setTimeout(() => fb.classList.remove("show"), 1300);
+  });
+
+  // ---------- Init ----------
+  resizeCanvas();
+  render();
+  updateCode();
+  pushHistory();
+
+})();
+</script>
+</body>
+</html>
